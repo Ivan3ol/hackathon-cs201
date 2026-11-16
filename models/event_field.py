@@ -1,6 +1,7 @@
 from enum import Enum
 
 
+# TODO consider if this is really necessary
 # Fields of the Event model and their names in every source API.
 #
 #   key        - name of the field in Event and in the output JSON

@@ -1,4 +1,3 @@
-import json
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -7,8 +6,9 @@ from zoneinfo import ZoneInfo
 import streamlit as st
 
 from models.event import Event
+from services.json_exporter import EVENTS_PATH, load_json
 
-# TODO replace with actual db data later
+# Test data, shown until main.py has collected real events
 SEED_PATH = Path(__file__).parent / "seed_events.json"
 
 # Ukrainian names
@@ -29,6 +29,8 @@ MONTHS = (
 )
 
 KYIV_TZ = ZoneInfo("Europe/Kyiv")
+UA_ALPHABET = "абвгґдеєжзиіїйклмнопрстуфхцчшщьюя"
+DESCRIPTION_PREVIEW = 200  # chars of description shown in a card before "Повний опис"
 # TODO change this to proper calendar
 PERIODS = ("Усі", "Сьогодні", "Вихідні", "Тиждень", "Свої дати")
 
@@ -47,16 +49,17 @@ class Filters:
 class EventsApp:
     def __init__(self) -> None:
         st.set_page_config(page_title="Події Києва", layout="wide")
-        self.events = self.load_events()
+        self.events, self.is_demo = self.load_events()
 
-    # Single entry point for UI data
+    # Single entry point for UI data.
+    # Reads events collected by main.py; falls back to seed data if there are none yet.
+    # Returns (events, is_demo).
     @staticmethod
     @st.cache_data(ttl=600)
-    def load_events() -> list[Event]:
-        data = json.loads(SEED_PATH.read_text(encoding="utf-8"))
-        for item in data:
-            item["start"] = datetime.fromisoformat(item["start"])
-        return sorted((Event(**item) for item in data), key=lambda e: e.start)
+    def load_events() -> tuple[list[Event], bool]:
+        if EVENTS_PATH.exists():
+            return sorted(load_json(EVENTS_PATH), key=lambda e: e.start), False
+        return sorted(load_json(SEED_PATH), key=lambda e: e.start), True
 
     def run(self) -> None:
         filters = self.render_filters()
@@ -66,6 +69,10 @@ class EventsApp:
 
     def render_header(self, shown: int) -> None:
         st.title("Події Києва")
+        if self.is_demo:
+            st.warning(
+                "Зібраних подій ще немає — показано тестові дані. Запустіть `python main.py`."
+            )
         st.caption(f"Знайдено подій: {shown} з {len(self.events)}")
 
     # Sidebar filter
@@ -83,13 +90,16 @@ class EventsApp:
 
             categories = st.multiselect(
                 "Категорія",
-                sorted({e.category for e in self.events if e.category}),
+                sorted(
+                    {c for e in self.events for c in EventsApp.categories_of(e)},
+                    key=EventsApp.ua_sort_key,
+                ),
                 placeholder="Усі",
                 select_all=False,  # built-in "Select all" is English-only; empty = all anyway
             )
             venues = st.multiselect(
                 "Майданчик",
-                sorted({e.venue for e in self.events}),
+                sorted({e.venue for e in self.events}, key=EventsApp.ua_sort_key),
                 placeholder="Усі",
                 select_all=False,
             )
@@ -123,7 +133,10 @@ class EventsApp:
                 continue
             if filters.date_to and day > filters.date_to:
                 continue
-            if filters.categories and event.category not in filters.categories:
+            # match if the event has at least one of the selected categories
+            if filters.categories and not set(EventsApp.categories_of(event)) & set(
+                filters.categories
+            ):
                 continue
             if filters.venues and event.venue not in filters.venues:
                 continue
@@ -157,8 +170,10 @@ class EventsApp:
                         unsafe_allow_html=True,
                     )
             with info:
-                if event.category:
-                    st.badge(event.category)
+                categories = EventsApp.categories_of(event)
+                if categories:
+                    # all badges in one line
+                    st.markdown(" ".join(f":blue-badge[{c}]" for c in categories))
                 st.subheader(event.title, anchor=False)
                 st.markdown(
                     f"🗓 **{EventsApp.format_date(event.start)}**  \n"
@@ -166,8 +181,33 @@ class EventsApp:
                     f"💰 {EventsApp.format_price(event)}"
                 )
                 if event.description:
-                    st.caption(event.description)
+                    EventsApp.render_description(event.description)
                 st.link_button("Детальніше", event.url)
+
+    # Event.category may hold several categories
+    @staticmethod
+    def categories_of(event: Event) -> list[str]:
+        if not event.category:
+            return []
+        return [c.strip() for c in event.category.split(",") if c.strip()]
+
+    # Ukrainian alphabetical order, Latin goes first
+    @staticmethod
+    def ua_sort_key(text: str) -> list[int]:
+        return [
+            1000 + UA_ALPHABET.index(ch) if ch in UA_ALPHABET else ord(ch) for ch in text.casefold()
+        ]
+
+    # Short preview, the full text is in a collapsed block
+    @staticmethod
+    def render_description(text: str) -> None:
+        if len(text) <= DESCRIPTION_PREVIEW:
+            st.caption(text)
+            return
+        preview = text[:DESCRIPTION_PREVIEW].rsplit(" ", 1)[0]  # cut at a word boundary
+        st.caption(preview + "…")
+        with st.expander("Повний опис"):
+            st.caption(text)
 
     # "Сб, 21 листопада · 11:00"
     @staticmethod
