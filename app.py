@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+import sqlite3
 
 import streamlit as st
 
@@ -8,9 +9,6 @@ from models.event import Event
 from pipeline import Pipeline
 from services.db import EventsDB
 from services.nbu_rates import NbuRatesService
-
-# TODO replace with actual db data later
-SEED_PATH = Path(__file__).parent / "seed_events.json"
 
 # Ukrainian names
 WEEKDAYS = ("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд")
@@ -72,9 +70,14 @@ class EventsApp:
         return database.load_events(), updated_at
 
     @staticmethod
-    @st.cache_data(ttl=3600)
     def load_exchange_rate(currency: str) -> float:
-        return NbuRatesService(currencies=(currency,)).get_rates()[currency].uah_per_unit
+        database = EventsDB()
+        cached = database.load_exchange_rate(currency)
+        if cached is not None and datetime.now(KYIV_TZ) - cached[1] < timedelta(hours=1):
+            return cached[0].uah_per_unit
+        rates = NbuRatesService().get_rates()
+        database.save_exchange_rates(rates)
+        return rates[currency].uah_per_unit
 
     def run(self) -> None:
         filters = self.render_filters()
@@ -100,7 +103,7 @@ class EventsApp:
         if self.currency != "UAH":
             try:
                 self.exchange_rate = self.load_exchange_rate(self.currency)
-            except (OSError, ValueError, KeyError) as exc:
+            except (OSError, ValueError, KeyError, sqlite3.Error) as exc:
                 st.error(f"Не вдалося завантажити курс валют: {exc}")
         if self.updated_at is None:
             # DB is empty and every source failed

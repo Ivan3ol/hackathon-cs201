@@ -5,6 +5,7 @@ from pathlib import Path
 
 from config import DB_PATH, KYIV_TZ
 from models.event import Event
+from services.nbu_rates import CurrencyRate
 
 
 # SQLite storage for events, the only class that talks to the database
@@ -24,6 +25,13 @@ class EventsDB:
         description TEXT,
         image_url   TEXT,
         scraped_at  TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS exchange_rates (
+        code         TEXT PRIMARY KEY,
+        name         TEXT,
+        uah_per_unit REAL NOT NULL,
+        unit_per_uah REAL NOT NULL,
+        fetched_at   TEXT NOT NULL
     );
     """
 
@@ -76,6 +84,34 @@ class EventsDB:
         with closing(self._connect()) as conn:
             value = conn.execute("SELECT MAX(scraped_at) FROM events").fetchone()[0]
         return datetime.fromisoformat(value).astimezone(KYIV_TZ) if value else None
+
+    def load_exchange_rate(self, code: str) -> tuple[CurrencyRate, datetime] | None:
+        if not self._path.exists():
+            return None
+        with closing(self._connect()) as conn:
+            row = conn.execute(
+                "SELECT name, uah_per_unit, unit_per_uah, fetched_at "
+                "FROM exchange_rates WHERE code = ?", (code,)
+            ).fetchone()
+        if row is None:
+            return None
+        return (
+            CurrencyRate(row["name"], row["uah_per_unit"], row["unit_per_uah"]),
+            datetime.fromisoformat(row["fetched_at"]),
+        )
+
+    def save_exchange_rates(self, rates: dict[str, CurrencyRate]) -> None:
+        now = EventsDB._utc(datetime.now(UTC))
+        rows = [
+            (code, rate.name, rate.uah_per_unit, rate.unit_per_uah, now)
+            for code, rate in rates.items()
+        ]
+        with closing(self._connect()) as conn, conn:
+            conn.executemany(
+                "INSERT OR REPLACE INTO exchange_rates "
+                "(code, name, uah_per_unit, unit_per_uah, fetched_at) VALUES (?, ?, ?, ?, ?)",
+                rows,
+            )
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._path)
