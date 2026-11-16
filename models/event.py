@@ -1,4 +1,5 @@
-from datetime import datetime
+import re
+from datetime import UTC, datetime
 
 
 # Base model for events to be scrapped and displayed.
@@ -70,6 +71,12 @@ class Event:
     @property
     def image_url(self) -> str | None:
         return self.__image_url
+
+    # Identity of an event across all sources - normalized title and start time
+    @property
+    def key(self) -> str:
+        title = re.sub(r"\W+", "", self.__title.casefold())
+        return f"{title}|{self.__start.astimezone(UTC).isoformat()}"
 
     def to_dict(self) -> dict[str, str | int | None]:
         return {
