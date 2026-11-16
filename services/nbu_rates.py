@@ -47,12 +47,6 @@ class NbuRatesService:
             "rates": {code: rates[code] for code in self._currencies},
         }
 
-    def save_json(self, path: str, on_date: date | None = None) -> dict[str, Any]:
-        data = self.get_rates(on_date)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        return data
-
     def _fetch(self, on_date: date | None) -> list[dict[str, Any]]:
         url = f"{self.API_URL}?json"
         if on_date is not None:
