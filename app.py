@@ -1,7 +1,7 @@
 import re
+import sqlite3
 from dataclasses import astuple, dataclass, field
 from datetime import date, datetime, timedelta
-import sqlite3
 
 import streamlit as st
 
@@ -19,6 +19,7 @@ from config import (
 from models.event import Event
 from pipeline import Pipeline
 from services.db import EventsDB
+from services.event_distance import EventDistanceService
 from services.nbu_rates import NbuRatesService
 
 
@@ -39,6 +40,7 @@ class EventsApp:
         self.events, self.updated_at = self.load_events()
         self.currency = st.session_state.get("currency", "UAH")
         self.exchange_rate = None
+        self.address = ""  # user's address from the sidebar, set in render_filters
 
     # returns (events, when the data was scraped; None if nothing was ever scraped)
     @staticmethod
@@ -140,6 +142,11 @@ class EventsApp:
                 placeholder="Усі",
                 select_all=False,
             )
+
+            # not a filter: used by "Розрахувати відстань" on event cards
+            self.address = st.text_input(
+                "Ваша адреса", placeholder="Вулиця та номер будинку", live=True
+            ).strip()
 
         return Filters(query.strip(), date_from, date_to, categories, venues)
 
@@ -282,7 +289,51 @@ class EventsApp:
                                 f"- [{EventsApp.format_date(s.start)}]({s.url})" for s in shows
                             )
                         )
-                st.link_button("Детальніше", event.url)
+                with st.container(horizontal=True):
+                    st.link_button("Детальніше", event.url)
+                    clicked = st.button(
+                        "📏 Розрахувати відстань",
+                        key=f"distance_{event.key}",
+                        disabled=not self.address,
+                        help=None if self.address else "Спершу введіть адресу в бічній панелі",
+                    )
+                if clicked:
+                    self.calculate_distance(event)
+                self.render_distance(event)
+
+    # Distance from the user's address to the event venue, saved in session_state
+    # so it stays on the card after the next rerun
+    def calculate_distance(self, event: Event) -> None:
+        with st.spinner("Рахуємо відстань…"):
+            try:
+                result = EventDistanceService().distances(self.address, [event])
+            except ValueError:  # the service could not find the user's address
+                st.warning("Не вдалося знайти вашу адресу. Перевірте, як вона написана.")
+                return
+            except OSError:
+                st.error("Не вдалося розрахувати відстань. Спробуйте пізніше.")
+                return
+        distances = st.session_state.setdefault("distances", {})
+        distances[(self.address, event.venue)] = result[0]["distance_km"]
+
+    def render_distance(self, event: Event) -> None:
+        distances = st.session_state.get("distances", {})
+        key = (self.address, event.venue)
+        if key not in distances:
+            return
+        km = distances[key]
+        if km is None:
+            st.caption("📏 Не вдалося знайти майданчик на мапі")
+        else:
+            st.markdown(f"📏 **≈ {EventsApp.format_distance(km)}** від вашої адреси (по прямій)")
+
+    # 0.85 -> "850 м", 3.24 -> "3,2 км"
+    @staticmethod
+    def format_distance(km: float) -> str:
+        meters = round(km * 1000, -1)
+        if meters < 1000:
+            return f"{meters:.0f} м"
+        return f"{km:.1f} км".replace(".", ",")
 
     # " · ще 54 дати, до 10 січня" for an event with several shows, "" otherwise
     @staticmethod
