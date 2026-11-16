@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from models.event import Event
 from models.event_field import EventField as F
 from scrapers.base import BaseScraper
+from utils.urls import strip_language_prefix
 
 KYIV_TZ = ZoneInfo("Europe/Kyiv")
 
@@ -86,7 +87,8 @@ class KarabasScraper(BaseScraper):
 
     def _to_event(self, item: dict[str, Any]) -> Event:
         title = (item.get(F.TITLE.karabas) or "").strip()
-        url = item.get(F.URL.karabas) or ""
+        # API returns ".../uk/<slug>/", but on karabas "/uk/..." is 404
+        url = strip_language_prefix(item.get(F.URL.karabas) or "")
         if not title or not url:
             raise ValueError("event without title or url")
         venue = item.get(F.VENUE.karabas) or item.get("building_group_name") or ""
