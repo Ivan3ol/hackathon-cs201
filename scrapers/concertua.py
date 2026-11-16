@@ -30,7 +30,8 @@ class ConcertuaScraper(BaseScraper):
         r"<script[^>]*application/ld\+json[^>]*>(.*?)</script>", re.IGNORECASE | re.DOTALL
     )
 
-    # limit - how many events (cards) to scrape, none = all upcoming events
+    # limit - how many API items (different events) to scrape, none = all upcoming events
+    # a group counts as one item with all its shows
     # expand_groups - load group pages to split groups into shows (one request per group)
     def __init__(
         self,
@@ -53,6 +54,7 @@ class ConcertuaScraper(BaseScraper):
     def scrape(self) -> list[Event]:
         events: list[Event] = []
         seen: set[tuple[str, datetime]] = set()
+        items_done = 0
         for item in self.iter_raw():
             try:
                 item_events = self._to_events(item)
@@ -64,8 +66,9 @@ class ConcertuaScraper(BaseScraper):
                     continue
                 seen.add((event.url, event.start))
                 events.append(event)
-            if self._limit is not None and len(events) >= self._limit:
-                return events[: self._limit]
+            items_done += 1
+            if self._limit is not None and items_done >= self._limit:
+                break
         return events
 
     # Raw items from the API

@@ -1,37 +1,25 @@
-from dataclasses import dataclass, field
+import re
+from dataclasses import astuple, dataclass, field
 from datetime import date, datetime, timedelta
 import sqlite3
 
 import streamlit as st
 
-from config import KYIV_TZ, SCRAPE_TTL_SECONDS
+from config import (
+    CACHE_TTL_SECONDS,
+    DESCRIPTION_PREVIEW,
+    KYIV_TZ,
+    MONTHS,
+    PAGE_SIZE,
+    PERIODS,
+    SCRAPE_TTL_SECONDS,
+    UA_ALPHABET,
+    WEEKDAYS,
+)
 from models.event import Event
 from pipeline import Pipeline
 from services.db import EventsDB
 from services.nbu_rates import NbuRatesService
-
-# Ukrainian names
-WEEKDAYS = ("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд")
-MONTHS = (
-    "січня",
-    "лютого",
-    "березня",
-    "квітня",
-    "травня",
-    "червня",
-    "липня",
-    "серпня",
-    "вересня",
-    "жовтня",
-    "листопада",
-    "грудня",
-)
-
-UA_ALPHABET = "абвгґдеєжзиіїйклмнопрстуфхцчшщьюя"
-CACHE_TTL_SECONDS = 600  # how often the app re-reads the DB
-DESCRIPTION_PREVIEW = 200  # chars of description shown in a card before "Повний опис"
-# TODO change this to proper calendar
-PERIODS = ("Усі", "Сьогодні", "Вихідні", "Тиждень", "Свої дати")
 
 
 # Current filter values from the sidebar
@@ -81,11 +69,18 @@ class EventsApp:
 
     def run(self) -> None:
         filters = self.render_filters()
+        # filters work on single shows, then shows of the same event become one card
         events = EventsApp.filter_events(self.events, filters)
-        self.render_header(len(events))
-        self.render_events(events)
+        groups = EventsApp.group_shows(events)
+        self.render_header(len(groups), len(events))
 
-    def render_header(self, shown: int) -> None:
+        page, pages = EventsApp.current_page(filters, len(groups))
+        first = (page - 1) * PAGE_SIZE
+        EventsApp.render_pagination(page, pages, "top")
+        self.render_events(groups[first : first + PAGE_SIZE])
+        EventsApp.render_pagination(page, pages, "bottom")
+
+    def render_header(self, shown_events: int, shown_shows: int) -> None:
         st.markdown(
             '<style>[data-testid="stPopoverBody"] { min-width: 0; width: max-content; }</style>',
             unsafe_allow_html=True,
@@ -108,7 +103,11 @@ class EventsApp:
         if self.updated_at is None:
             # DB is empty and every source failed
             st.warning("Не вдалося зібрати події з афіш. Спробуйте пізніше.")
-        caption = f"Знайдено подій: {shown} з {len(self.events)}"
+        total = len(EventsApp.group_shows(self.events))
+        caption = f"Знайдено подій: {shown_events} з {total}"
+        if shown_shows != shown_events:
+            word = EventsApp.plural(shown_shows, ("показ", "покази", "показів"))
+            caption += f" ({shown_shows} {word})"
         if self.updated_at:
             caption += f" · оновлено {EventsApp.format_date(self.updated_at)}"
         st.caption(caption)
@@ -187,14 +186,71 @@ class EventsApp:
             result.append(event)
         return result
 
-    def render_events(self, events: list[Event]) -> None:
-        if not events:
+    def render_events(self, groups: list[list[Event]]) -> None:
+        if not groups:
             st.info("Подій не знайдено.")
             return
-        for event in events:
-            self.render_event_card(event)
+        for shows in groups:
+            self.render_event_card(shows)
 
-    def render_event_card(self, event: Event) -> None:
+    # Shows of the same event (same title and venue) in one list
+    @staticmethod
+    def group_shows(events: list[Event]) -> list[list[Event]]:
+        groups: dict[tuple[str, str], list[Event]] = {}
+        for event in events:
+            key = (re.sub(r"\W+", "", event.title.casefold()), event.venue.casefold())
+            groups.setdefault(key, []).append(event)
+        # events come sorted by start, so groups are ordered by their next show
+        return list(groups.values())
+
+    # Current page (1-based) and number of pages, goes back to page 1 when filters change
+    @staticmethod
+    def current_page(filters: Filters, total: int) -> tuple[int, int]:
+        pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+        # compare plain values, since two Filters objects are never equal
+        values = astuple(filters)
+        if st.session_state.get("filters") != values:
+            st.session_state["filters"] = values
+            st.session_state["page"] = 1
+        page = min(max(st.session_state.get("page", 1), 1), pages)
+        st.session_state["page"] = page
+        return page, pages
+
+    # position - "top" or "bottom", makes widget keys unique
+    @staticmethod
+    def render_pagination(page: int, pages: int, position: str) -> None:
+        if pages <= 1:
+            return
+        prev_col, info_col, next_col = st.columns([1, 2, 1], vertical_alignment="center")
+        prev_col.button(
+            "← Попередня",
+            key=f"prev_{position}",
+            disabled=page <= 1,
+            on_click=EventsApp.go_to_page,
+            args=(page - 1,),
+            width="stretch",
+        )
+        info_col.markdown(
+            f"<div style='text-align:center'>Сторінка {page} з {pages}</div>",
+            unsafe_allow_html=True,
+        )
+        next_col.button(
+            "Наступна →",
+            key=f"next_{position}",
+            disabled=page >= pages,
+            on_click=EventsApp.go_to_page,
+            args=(page + 1,),
+            width="stretch",
+        )
+
+    # button callback: runs before the rerun, so the new page is rendered right away
+    @staticmethod
+    def go_to_page(page: int) -> None:
+        st.session_state["page"] = page
+
+    # One card per event, shows - all its (filtered) shows, the first one is the nearest
+    def render_event_card(self, shows: list[Event]) -> None:
+        event = shows[0]
         with st.container(border=True):
             poster, info = st.columns([1, 5], gap="medium")
             with poster:
@@ -212,13 +268,40 @@ class EventsApp:
                     st.markdown(" ".join(f":blue-badge[{c}]" for c in categories))
                 st.subheader(event.title, anchor=False)
                 st.markdown(
-                    f"🗓 **{EventsApp.format_date(event.start)}**  \n"
+                    f"🗓 **{EventsApp.format_date(event.start)}**"
+                    f"{EventsApp.more_dates(shows)}  \n"
                     f"📍 {event.venue}  \n"
                     f"💰 {self.format_price(event)}"
                 )
                 if event.description:
                     EventsApp.render_description(event.description)
+                if len(shows) > 1:
+                    with st.expander(f"Усі дати ({len(shows)})"):
+                        st.markdown(
+                            "\n".join(
+                                f"- [{EventsApp.format_date(s.start)}]({s.url})" for s in shows
+                            )
+                        )
                 st.link_button("Детальніше", event.url)
+
+    # " · ще 54 дати, до 10 січня" for an event with several shows, "" otherwise
+    @staticmethod
+    def more_dates(shows: list[Event]) -> str:
+        more = len(shows) - 1
+        if more == 0:
+            return ""
+        last = shows[-1].start
+        word = EventsApp.plural(more, ("дата", "дати", "дат"))
+        return f" · ще {more} {word}, до {last.day} {MONTHS[last.month - 1]}"
+
+    # Ukrainian plural form: 1 дата, 2 дати, 5 дат, 11 дат, 21 дата
+    @staticmethod
+    def plural(n: int, forms: tuple[str, str, str]) -> str:
+        if n % 10 == 1 and n % 100 != 11:
+            return forms[0]
+        if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+            return forms[1]
+        return forms[2]
 
     # Event.category may hold several categories
     @staticmethod
