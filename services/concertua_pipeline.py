@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 from models.event import Event
-from scrapers.Scrapper_concertua import DEFAULT_TIMEOUT, fetch_items
+from scrapers.concertua import DEFAULT_TIMEOUT, ConcertuaScraper
 
 
 CONCERTUA_URL = "https://concert.ua/"
@@ -277,16 +277,21 @@ def fetch_events(
     enrich_details=True,
 ):
     """Fetch raw API data and return its items formatted as Event objects."""
-    response = fetch_items(
+    return ConcertuaScraper(
         timeout=timeout,
-        category_ids=category_id,
-        city_ids=city_id,
+        category_id=category_id,
+        city_id=city_id,
         language=language,
         limit=limit,
         offset=offset,
         sort_type=sort_type,
         params=params,
-    )
+        enrich_details=enrich_details,
+    ).scrape()
+
+
+def response_to_events(response, *, timeout=DEFAULT_TIMEOUT, enrich_details=True):
+    """Convert a raw response and optionally enrich missing event details."""
     events = items_to_events(response)
     if not enrich_details:
         return events
