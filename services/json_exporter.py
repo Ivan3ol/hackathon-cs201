@@ -6,9 +6,6 @@ from typing import Any
 from models.event import Event
 from models.event_field import EventField
 
-# TODO this is temporary, until we have a DB
-EVENTS_PATH = Path(__file__).resolve().parent.parent / "events.json"
-
 
 # Common JSON representation of an event, the same for every scraper
 def event_to_dict(event: Event) -> dict[str, Any]:

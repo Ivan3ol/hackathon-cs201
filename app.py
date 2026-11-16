@@ -1,12 +1,12 @@
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 import streamlit as st
 
+from config import EVENTS_PATH, KYIV_TZ
 from models.event import Event
-from services.json_exporter import EVENTS_PATH, load_json
+from services.json_exporter import load_json
 
 # Test data, shown until main.py has collected real events
 SEED_PATH = Path(__file__).parent / "seed_events.json"
@@ -28,7 +28,6 @@ MONTHS = (
     "грудня",
 )
 
-KYIV_TZ = ZoneInfo("Europe/Kyiv")
 UA_ALPHABET = "абвгґдеєжзиіїйклмнопрстуфхцчшщьюя"
 DESCRIPTION_PREVIEW = 200  # chars of description shown in a card before "Повний опис"
 # TODO change this to proper calendar
