@@ -15,12 +15,12 @@ DB_PATH = BASE_DIR / "events.db"
 EVENTS_PATH = BASE_DIR / "events.json"
 
 # How many events each scraper collects, None -> all upcoming events
-KARABAS_LIMIT = 100
-# Karabas counts single shows, Concert.ua counts different events with all their shows
+KARABAS_LIMIT = None  # all shows (~1900, ~15 s)
+# Concert.ua counts different events with all their shows: 100 = one API page of 100 items
 CONCERTUA_LIMIT = 100
 
 # How old the data in the DB may be before the app scrapes again
-SCRAPE_TTL_SECONDS = 60 * 60
+SCRAPE_TTL_SECONDS = 24 * 60 * 60
 
 # UI
 
