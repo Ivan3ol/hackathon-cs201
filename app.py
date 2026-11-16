@@ -1,37 +1,24 @@
-from dataclasses import dataclass, field
+from dataclasses import astuple, dataclass, field
 from datetime import date, datetime, timedelta
 import sqlite3
 
 import streamlit as st
 
-from config import KYIV_TZ, SCRAPE_TTL_SECONDS
+from config import (
+    CACHE_TTL_SECONDS,
+    DESCRIPTION_PREVIEW,
+    KYIV_TZ,
+    MONTHS,
+    PAGE_SIZE,
+    PERIODS,
+    SCRAPE_TTL_SECONDS,
+    UA_ALPHABET,
+    WEEKDAYS,
+)
 from models.event import Event
 from pipeline import Pipeline
 from services.db import EventsDB
 from services.nbu_rates import NbuRatesService
-
-# Ukrainian names
-WEEKDAYS = ("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд")
-MONTHS = (
-    "січня",
-    "лютого",
-    "березня",
-    "квітня",
-    "травня",
-    "червня",
-    "липня",
-    "серпня",
-    "вересня",
-    "жовтня",
-    "листопада",
-    "грудня",
-)
-
-UA_ALPHABET = "абвгґдеєжзиіїйклмнопрстуфхцчшщьюя"
-CACHE_TTL_SECONDS = 600  # how often the app re-reads the DB
-DESCRIPTION_PREVIEW = 200  # chars of description shown in a card before "Повний опис"
-# TODO change this to proper calendar
-PERIODS = ("Усі", "Сьогодні", "Вихідні", "Тиждень", "Свої дати")
 
 
 # Current filter values from the sidebar
@@ -83,7 +70,12 @@ class EventsApp:
         filters = self.render_filters()
         events = EventsApp.filter_events(self.events, filters)
         self.render_header(len(events))
-        self.render_events(events)
+
+        page, pages = EventsApp.current_page(filters, len(events))
+        first = (page - 1) * PAGE_SIZE
+        EventsApp.render_pagination(page, pages, "top")
+        EventsApp.render_events(events[first : first + PAGE_SIZE])
+        EventsApp.render_pagination(page, pages, "bottom")
 
     def render_header(self, shown: int) -> None:
         st.markdown(
@@ -194,7 +186,53 @@ class EventsApp:
         for event in events:
             self.render_event_card(event)
 
-    def render_event_card(self, event: Event) -> None:
+    # Current page (1-based) and number of pages, goes back to page 1 when filters change
+    @staticmethod
+    def current_page(filters: Filters, total: int) -> tuple[int, int]:
+        pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+        # compare plain values, since two Filters objects are never equal
+        values = astuple(filters)
+        if st.session_state.get("filters") != values:
+            st.session_state["filters"] = values
+            st.session_state["page"] = 1
+        page = min(max(st.session_state.get("page", 1), 1), pages)
+        st.session_state["page"] = page
+        return page, pages
+
+    # position - "top" or "bottom", makes widget keys unique
+    @staticmethod
+    def render_pagination(page: int, pages: int, position: str) -> None:
+        if pages <= 1:
+            return
+        prev_col, info_col, next_col = st.columns([1, 2, 1], vertical_alignment="center")
+        prev_col.button(
+            "← Попередня",
+            key=f"prev_{position}",
+            disabled=page <= 1,
+            on_click=EventsApp.go_to_page,
+            args=(page - 1,),
+            width="stretch",
+        )
+        info_col.markdown(
+            f"<div style='text-align:center'>Сторінка {page} з {pages}</div>",
+            unsafe_allow_html=True,
+        )
+        next_col.button(
+            "Наступна →",
+            key=f"next_{position}",
+            disabled=page >= pages,
+            on_click=EventsApp.go_to_page,
+            args=(page + 1,),
+            width="stretch",
+        )
+
+    # button callback: runs before the rerun, so the new page is rendered right away
+    @staticmethod
+    def go_to_page(page: int) -> None:
+        st.session_state["page"] = page
+
+    @staticmethod
+    def render_event_card(event: Event) -> None:
         with st.container(border=True):
             poster, info = st.columns([1, 5], gap="medium")
             with poster:
