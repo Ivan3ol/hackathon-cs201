@@ -77,7 +77,7 @@ class EventsApp:
         page, pages = EventsApp.current_page(filters, len(groups))
         first = (page - 1) * PAGE_SIZE
         EventsApp.render_pagination(page, pages, "top")
-        EventsApp.render_events(groups[first : first + PAGE_SIZE])
+        self.render_events(groups[first : first + PAGE_SIZE])
         EventsApp.render_pagination(page, pages, "bottom")
 
     def render_header(self, shown_events: int, shown_shows: int) -> None:
@@ -186,13 +186,12 @@ class EventsApp:
             result.append(event)
         return result
 
-    @staticmethod
-    def render_events(groups: list[list[Event]]) -> None:
+    def render_events(self, groups: list[list[Event]]) -> None:
         if not groups:
             st.info("Подій не знайдено.")
             return
         for shows in groups:
-            EventsApp.render_event_card(shows)
+            self.render_event_card(shows)
 
     # Shows of the same event (same title and venue) in one list
     @staticmethod
@@ -250,8 +249,7 @@ class EventsApp:
         st.session_state["page"] = page
 
     # One card per event, shows - all its (filtered) shows, the first one is the nearest
-    @staticmethod
-    def render_event_card(shows: list[Event]) -> None:
+    def render_event_card(self, shows: list[Event]) -> None:
         event = shows[0]
         with st.container(border=True):
             poster, info = st.columns([1, 5], gap="medium")
