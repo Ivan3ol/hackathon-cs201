@@ -71,5 +71,19 @@ class Event:
     def image_url(self) -> str | None:
         return self.__image_url
 
+    def to_dict(self) -> dict[str, str | int | None]:
+        return {
+            "title": self.__title,
+            "start": self.__start.isoformat(),
+            "venue": self.__venue,
+            "url": self.__url,
+            "source": self.__source,
+            "category": self.__category,
+            "price_min": self.__price_min,
+            "price_max": self.__price_max,
+            "description": self.__description,
+            "image_url": self.__image_url,
+        }
+
     def __repr__(self) -> str:
-        return f"Event({self.__title!r}, {self.__start:%Y-%m-%d %H:%M}, {self.__venue!r})"
+        return f"Event({self.to_dict()!r})"
