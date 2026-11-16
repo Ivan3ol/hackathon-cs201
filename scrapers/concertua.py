@@ -7,13 +7,11 @@ import urllib.request
 from collections.abc import Iterator
 from datetime import datetime
 from typing import Any
-from zoneinfo import ZoneInfo
 
+from config import KYIV_TZ
 from models.event import Event
 from models.event_field import EventField as F
 from scrapers.base import BaseScraper
-
-KYIV_TZ = ZoneInfo("Europe/Kyiv")
 
 
 # TODO add proper support for groups

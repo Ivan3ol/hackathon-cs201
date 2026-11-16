@@ -1,5 +1,6 @@
 import json
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any
 
 from models.event import Event
@@ -11,29 +12,21 @@ def event_to_dict(event: Event) -> dict[str, Any]:
     return {field.key: _plain(getattr(event, field.key)) for field in EventField}
 
 
-# Any result -> JSON string: list[Event], dict / list from services, etc.
-def to_json(data: Any) -> str:
-    return json.dumps(_plain(data), ensure_ascii=False, indent=2)
+def dict_to_event(data: dict[str, Any]) -> Event:
+    values = {field.key: data.get(field.key) for field in EventField}
+    values["start"] = datetime.fromisoformat(values["start"])
+    return Event(**values)
 
 
-# Saves what a scraper / service returned: save_json(KarabasScraper().scrape(), "events.json")
-def save_json(data: Any, path: str) -> None:
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(to_json(data))
-
-
-# kept for compatibility
 def events_to_json(events: list[Event]) -> str:
-    return to_json(events)
+    return json.dumps([event_to_dict(e) for e in events], ensure_ascii=False, indent=2)
 
 
-def _plain(value: Any) -> Any:
-    if isinstance(value, Event):
-        return event_to_dict(value)
-    if isinstance(value, (datetime, date)):
-        return value.isoformat()  # e.g. 2026-12-23T18:00:00+02:00
-    if isinstance(value, dict):
-        return {k: _plain(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_plain(v) for v in value]
-    return value
+def save_json(events: list[Event], path: str | Path) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(events_to_json(events))
+
+
+def load_json(path: str | Path) -> list[Event]:
+    with open(path, encoding="utf-8") as f:
+        return [dict_to_event(item) for item in json.load(f)]

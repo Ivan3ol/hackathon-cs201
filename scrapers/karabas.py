@@ -5,14 +5,12 @@ import time
 import urllib.request
 from datetime import datetime
 from typing import Any, Iterator
-from zoneinfo import ZoneInfo
 
+from config import KYIV_TZ
 from models.event import Event
 from models.event_field import EventField as F
 from scrapers.base import BaseScraper
 from utils.urls import strip_language_prefix
-
-KYIV_TZ = ZoneInfo("Europe/Kyiv")
 
 
 # Scraper for upcoming events on https://kyiv.karabas.com/
