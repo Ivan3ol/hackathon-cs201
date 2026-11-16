@@ -51,13 +51,25 @@ class EventsApp:
         if updated_at is None or datetime.now(KYIV_TZ) - updated_at > timedelta(
             seconds=SCRAPE_TTL_SECONDS
         ):
-            # the first source written wins on duplicates
-            for source, events in Pipeline.default().run().items():
-                # scrapes again only if the DB is empty or older than SCRAPE_TTL_SECONDS
-                database.replace_source(source, events)
+            # scrapes again only if the DB is empty or older than SCRAPE_TTL_SECONDS
+            EventsApp.refresh_database(database)
             updated_at = database.last_scraped_at()
 
         return database.load_events(), updated_at
+
+    # Scrapes all sources and writes them to the DB; the first source written wins on duplicates
+    @staticmethod
+    def refresh_database(database: EventsDB) -> None:
+        for source, events in Pipeline.default().run().items():
+            database.replace_source(source, events)
+
+    # "Оновити зараз" button: scrape right away, ignoring SCRAPE_TTL_SECONDS
+    @staticmethod
+    def force_refresh() -> None:
+        with st.spinner("Збираємо події з афіш…"):
+            EventsApp.refresh_database(EventsDB())
+        EventsApp.load_events.clear()  # drop cached events so the page reads the fresh DB
+        st.rerun()
 
     @staticmethod
     def load_exchange_rate(currency: str) -> float:
@@ -112,7 +124,10 @@ class EventsApp:
             caption += f" ({shown_shows} {word})"
         if self.updated_at:
             caption += f" · оновлено {EventsApp.format_date(self.updated_at)}"
-        st.caption(caption)
+        with st.container(horizontal=True, vertical_alignment="center"):
+            st.caption(caption)
+            if st.button("🔄 Оновити зараз", help="Зібрати події з афіш заново (≈ 30–40 с)"):
+                EventsApp.force_refresh()
 
     # Sidebar filter
     def render_filters(self) -> Filters:
