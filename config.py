@@ -14,8 +14,9 @@ DB_PATH = BASE_DIR / "events.db"
 # Events saved by main.py (manual testing only)
 EVENTS_PATH = BASE_DIR / "events.json"
 
-# How many events (cards) each scraper collects; None = all upcoming events
+# How many events each scraper collects, None -> all upcoming events
 KARABAS_LIMIT = 100
+# Karabas counts single shows, Concert.ua counts different events with all their shows
 CONCERTUA_LIMIT = 100
 
 # How old the data in the DB may be before the app scrapes again
