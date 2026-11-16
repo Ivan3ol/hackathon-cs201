@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+import sqlite3
 
 import streamlit as st
 
@@ -7,6 +8,7 @@ from config import KYIV_TZ, SCRAPE_TTL_SECONDS
 from models.event import Event
 from pipeline import Pipeline
 from services.db import EventsDB
+from services.nbu_rates import NbuRatesService
 
 # Ukrainian names
 WEEKDAYS = ("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд")
@@ -47,6 +49,8 @@ class EventsApp:
     def __init__(self) -> None:
         st.set_page_config(page_title="Події Києва", layout="wide")
         self.events, self.updated_at = self.load_events()
+        self.currency = st.session_state.get("currency", "UAH")
+        self.exchange_rate = None
 
     # returns (events, when the data was scraped; None if nothing was ever scraped)
     @staticmethod
@@ -65,14 +69,42 @@ class EventsApp:
 
         return database.load_events(), updated_at
 
+    @staticmethod
+    def load_exchange_rate(currency: str) -> float:
+        database = EventsDB()
+        cached = database.load_exchange_rate(currency)
+        if cached is not None and datetime.now(KYIV_TZ) - cached[1] < timedelta(hours=1):
+            return cached[0].uah_per_unit
+        rates = NbuRatesService().get_rates()
+        database.save_exchange_rates(rates)
+        return rates[currency].uah_per_unit
+
     def run(self) -> None:
         filters = self.render_filters()
         events = EventsApp.filter_events(self.events, filters)
         self.render_header(len(events))
-        EventsApp.render_events(events)
+        self.render_events(events)
 
     def render_header(self, shown: int) -> None:
-        st.title("Події Києва")
+        st.markdown(
+            '<style>[data-testid="stPopoverBody"] { min-width: 0; width: max-content; }</style>',
+            unsafe_allow_html=True,
+        )
+        title, currency = st.columns([5, 1])
+        with title:
+            st.title("Події Києва")
+        with currency:
+            with st.popover(f"Валюта: {self.currency}"):
+                for code in ("UAH", "USD", "GBP", "EUR"):
+                    if st.button(code, key=f"currency_{code}"):
+                        st.session_state["currency"] = code
+                        st.rerun()
+        self.exchange_rate = None
+        if self.currency != "UAH":
+            try:
+                self.exchange_rate = self.load_exchange_rate(self.currency)
+            except (OSError, ValueError, KeyError, sqlite3.Error) as exc:
+                st.error(f"Не вдалося завантажити курс валют: {exc}")
         if self.updated_at is None:
             # DB is empty and every source failed
             st.warning("Не вдалося зібрати події з афіш. Спробуйте пізніше.")
@@ -155,16 +187,14 @@ class EventsApp:
             result.append(event)
         return result
 
-    @staticmethod
-    def render_events(events: list[Event]) -> None:
+    def render_events(self, events: list[Event]) -> None:
         if not events:
             st.info("Подій не знайдено.")
             return
         for event in events:
-            EventsApp.render_event_card(event)
+            self.render_event_card(event)
 
-    @staticmethod
-    def render_event_card(event: Event) -> None:
+    def render_event_card(self, event: Event) -> None:
         with st.container(border=True):
             poster, info = st.columns([1, 5], gap="medium")
             with poster:
@@ -184,7 +214,7 @@ class EventsApp:
                 st.markdown(
                     f"🗓 **{EventsApp.format_date(event.start)}**  \n"
                     f"📍 {event.venue}  \n"
-                    f"💰 {EventsApp.format_price(event)}"
+                    f"💰 {self.format_price(event)}"
                 )
                 if event.description:
                     EventsApp.render_description(event.description)
@@ -222,10 +252,17 @@ class EventsApp:
         month = MONTHS[start.month - 1]
         return f"{weekday}, {start.day} {month} · {start:%H:%M}"
 
-    @staticmethod
-    def format_price(event: Event) -> str:
+    def format_price(self, event: Event) -> str:
         if event.price_min is None:
             return "Ціну не вказано"
+        if self.currency != "UAH":
+            if self.exchange_rate is None:
+                return "Курс валюти недоступний"
+            minimum = event.price_min / self.exchange_rate
+            if event.price_max and event.price_max != event.price_min:
+                maximum = event.price_max / self.exchange_rate
+                return f"{minimum:.2f}–{maximum:.2f} {self.currency}"
+            return f"від {minimum:.2f} {self.currency}"
         if event.price_max and event.price_max != event.price_min:
             return f"{event.price_min}–{event.price_max} грн"
         return f"від {event.price_min} грн"
