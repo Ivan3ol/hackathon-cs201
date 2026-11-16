@@ -1,16 +1,12 @@
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from pathlib import Path
 
 import streamlit as st
 
 from config import KYIV_TZ, SCRAPE_TTL_SECONDS
 from models.event import Event
 from pipeline import Pipeline
-from services.json_exporter import load_json
-
-# Test data, shown if no source could be scraped
-SEED_PATH = Path(__file__).parent / "seed_events.json"
+from services.db import EventsDB
 
 # Ukrainian names
 WEEKDAYS = ("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд")
@@ -30,6 +26,7 @@ MONTHS = (
 )
 
 UA_ALPHABET = "абвгґдеєжзиіїйклмнопрстуфхцчшщьюя"
+CACHE_TTL_SECONDS = 600  # how often the app re-reads the DB
 DESCRIPTION_PREVIEW = 200  # chars of description shown in a card before "Повний опис"
 # TODO change this to proper calendar
 PERIODS = ("Усі", "Сьогодні", "Вихідні", "Тиждень", "Свої дати")
@@ -49,18 +46,24 @@ class Filters:
 class EventsApp:
     def __init__(self) -> None:
         st.set_page_config(page_title="Події Києва", layout="wide")
-        self.events, self.is_demo = self.load_events()
+        self.events, self.updated_at = self.load_events()
 
-    # Single entry point for UI data.
-    # Returns (events, is_demo).
+    # returns (events, when the data was scraped; None if nothing was ever scraped)
     @staticmethod
-    @st.cache_data(ttl=SCRAPE_TTL_SECONDS, show_spinner="Збираємо події з афіш…")
-    def load_events() -> tuple[list[Event], bool]:
-        # Scrapes all sources through the pipeline, the result is cached for SCRAPE_TTL_SECONDS
-        events = Pipeline.merge(Pipeline.default().run())
-        if events:
-            return events, False
-        return sorted(load_json(SEED_PATH), key=lambda e: e.start), True
+    @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner="Збираємо події з афіш…")
+    def load_events() -> tuple[list[Event], datetime | None]:
+        database = EventsDB()
+        updated_at = database.last_scraped_at()
+        if updated_at is None or datetime.now(KYIV_TZ) - updated_at > timedelta(
+            seconds=SCRAPE_TTL_SECONDS
+        ):
+            # the first source written wins on duplicates
+            for source, events in Pipeline.default().run().items():
+                # scrapes again only if the DB is empty or older than SCRAPE_TTL_SECONDS
+                database.replace_source(source, events)
+            updated_at = database.last_scraped_at()
+
+        return database.load_events(), updated_at
 
     def run(self) -> None:
         filters = self.render_filters()
@@ -70,9 +73,13 @@ class EventsApp:
 
     def render_header(self, shown: int) -> None:
         st.title("Події Києва")
-        if self.is_demo:
-            st.warning("Не вдалося зібрати події з афіш — показано тестові дані.")
-        st.caption(f"Знайдено подій: {shown} з {len(self.events)}")
+        if self.updated_at is None:
+            # DB is empty and every source failed
+            st.warning("Не вдалося зібрати події з афіш. Спробуйте пізніше.")
+        caption = f"Знайдено подій: {shown} з {len(self.events)}"
+        if self.updated_at:
+            caption += f" · оновлено {EventsApp.format_date(self.updated_at)}"
+        st.caption(caption)
 
     # Sidebar filter
     def render_filters(self) -> Filters:
