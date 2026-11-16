@@ -1,0 +1,21 @@
+{
+  "date": "2026-11-17",
+  "source": "bank.gov.ua",
+  "rates": {
+    "USD": {
+      "name": "Долар США",
+      "uah_per_unit": 45.3918,
+      "unit_per_uah": 0.02203
+    },
+    "EUR": {
+      "name": "Євро",
+      "uah_per_unit": 49.9881,
+      "unit_per_uah": 0.020005
+    },
+    "GBP": {
+      "name": "Фунт стерлінгів",
+      "uah_per_unit": 59.9083,
+      "unit_per_uah": 0.016692
+    }
+  }
+}
