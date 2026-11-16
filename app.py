@@ -4,11 +4,12 @@ from pathlib import Path
 
 import streamlit as st
 
-from config import EVENTS_PATH, KYIV_TZ
+from config import KYIV_TZ, SCRAPE_TTL_SECONDS
 from models.event import Event
+from pipeline import Pipeline
 from services.json_exporter import load_json
 
-# Test data, shown until main.py has collected real events
+# Test data, shown if no source could be scraped
 SEED_PATH = Path(__file__).parent / "seed_events.json"
 
 # Ukrainian names
@@ -51,13 +52,14 @@ class EventsApp:
         self.events, self.is_demo = self.load_events()
 
     # Single entry point for UI data.
-    # Reads events collected by main.py; falls back to seed data if there are none yet.
     # Returns (events, is_demo).
     @staticmethod
-    @st.cache_data(ttl=600)
+    @st.cache_data(ttl=SCRAPE_TTL_SECONDS, show_spinner="Збираємо події з афіш…")
     def load_events() -> tuple[list[Event], bool]:
-        if EVENTS_PATH.exists():
-            return sorted(load_json(EVENTS_PATH), key=lambda e: e.start), False
+        # Scrapes all sources through the pipeline, the result is cached for SCRAPE_TTL_SECONDS
+        events = Pipeline.merge(Pipeline.default().run())
+        if events:
+            return events, False
         return sorted(load_json(SEED_PATH), key=lambda e: e.start), True
 
     def run(self) -> None:
@@ -69,9 +71,7 @@ class EventsApp:
     def render_header(self, shown: int) -> None:
         st.title("Події Києва")
         if self.is_demo:
-            st.warning(
-                "Зібраних подій ще немає — показано тестові дані. Запустіть `python main.py`."
-            )
+            st.warning("Не вдалося зібрати події з афіш — показано тестові дані.")
         st.caption(f"Знайдено подій: {shown} з {len(self.events)}")
 
     # Sidebar filter

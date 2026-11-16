@@ -9,5 +9,12 @@ BASE_DIR = Path(__file__).resolve().parent
 KYIV_TZ = ZoneInfo("Europe/Kyiv")
 
 # TODO this is temporary, until we have a DB
-# Events collected by main.py and shown by app.py
+# Events saved by main.py (manual testing only)
 EVENTS_PATH = BASE_DIR / "events.json"
+
+# How many events (cards) each scraper collects; None = all upcoming events
+KARABAS_LIMIT = 100
+CONCERTUA_LIMIT = 100
+
+# How long the app keeps scraped events before scraping again
+SCRAPE_TTL_SECONDS = 60 * 60
